@@ -182,49 +182,29 @@ def to_glb(
     if verbose:
         print("Sampling attributes...", end='', flush=True)
         
-    # --- DRTK Rasterization Replacement ---
-    # Convert UVs (0..1) to Screen Coords (0..texture_size)
-    # out_uvs: [V, 2]
-    # We create a dummy Z=1.0 for projection
     uvs_screen_x = out_uvs[:, 0] * texture_size
     uvs_screen_y = out_uvs[:, 1] * texture_size
     uvs_screen_z = torch.ones_like(uvs_screen_x)
     
     uvs_screen = torch.stack([uvs_screen_x, uvs_screen_y, uvs_screen_z], dim=-1).unsqueeze(0) # [1, V, 3]
 
-    # Rasterize
-    # Note: Splitting into chunks for memory efficiency is harder with drtk direct calls unless we handle the buffer manually.
-    # For simplicity here assuming GPU memory holds the texture buffer.
-    
-    # Initialize buffers
     tri_idx_map = torch.full((1, texture_size, texture_size), -1, dtype=torch.int32, device='cuda')
     
-    # Chunking loop for rasterization
     chunk_size = 100000
     for i in range(0, out_faces.shape[0], chunk_size):
         faces_chunk = out_faces[i:i+chunk_size]
-        
-        # Rasterize chunk
         curr_tri_idx = drtk.rasterize(uvs_screen, faces_chunk, height=texture_size, width=texture_size)
-        
-        # Update map where triangles are found
         mask_chunk = curr_tri_idx != -1
-        # Store global face index
         tri_idx_map[mask_chunk] = curr_tri_idx[mask_chunk] + i
 
-    # Compute Barycentrics for the full map
-    # We need to render again or compute barycentrics based on the final ID map.
-    # drtk.render requires the specific faces and their specific local IDs.
-    # Since we have global IDs in tri_idx_map, we can use the full face list.
-    
     _, barys = drtk.render(uvs_screen, out_faces, tri_idx_map)
     
     mask = tri_idx_map[0] != -1
     
-    # Interpolate using DRTK
-    # drtk.interpolate(attr, faces, tri_idx, barys)
-    # attr: [1, V, C] (Position in this case)
+    # [Fix] Permute dimensions if output is CHW (drtk convention) to HWC (mask convention)
     pos = drtk.interpolate(out_vertices.unsqueeze(0), out_faces, tri_idx_map, barys)[0]
+    if pos.shape[0] == 3 and pos.shape[1] == texture_size:
+        pos = pos.permute(1, 2, 0)
     
     valid_pos = pos[mask]
     
