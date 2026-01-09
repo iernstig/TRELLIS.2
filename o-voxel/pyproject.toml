@@ -8,7 +8,7 @@ requires = [
     "trimesh",
     "tqdm",
     "zstandard",
-    "easydict"
+    "easydict",
     "drtk"
 ]
 build-backend = "setuptools.build_meta"
