@@ -5,6 +5,7 @@ import cv2
 import drtk
 import numpy as np
 import torch
+import torch.nn.functional as F
 import trimesh
 import trimesh.visual
 from flex_gemm.ops.grid_sample import grid_sample_3d
@@ -213,13 +214,36 @@ def to_glb(
     valid_pos = (orig_tri_verts * uvw.unsqueeze(-1)).sum(dim=1)
     
     attrs = torch.zeros(texture_size, texture_size, attr_volume.shape[1], device='cuda')
-    attrs[mask] = grid_sample_3d(
-        attr_volume,
-        torch.cat([torch.zeros_like(coords[:, :1]), coords], dim=-1),
-        shape=torch.Size([1, attr_volume.shape[1], *grid_size.tolist()]),
-        grid=((valid_pos - aabb[0]) / voxel_size).reshape(1, -1, 3),
-        mode='trilinear',
-    )
+
+    if attr_volume.dim() == 5:
+        # Dense volume case: (1, C, D, H, W)
+        # Normalize valid_pos to [-1, 1] relative to AABB
+        extent = aabb[1] - aabb[0]
+        sample_grid = ((valid_pos - aabb[0]) / extent) * 2 - 1
+        
+        # Reshape for grid_sample: (1, 1, 1, N_points, 3)
+        sample_grid = sample_grid.reshape(1, 1, 1, -1, 3)
+        
+        # Sample using standard PyTorch bilinear (trilinear for 3D) interpolation
+        sampled_attrs = F.grid_sample(
+            attr_volume,
+            sample_grid,
+            mode='bilinear',
+            align_corners=False
+        )
+        # Result: (1, C, 1, 1, N_points) -> (C, N_points) -> (N_points, C)
+        sampled_attrs = sampled_attrs.view(attr_volume.shape[1], -1).permute(1, 0)
+        attrs[mask] = sampled_attrs
+    else:
+        # Sparse case using custom grid_sample_3d
+        attrs[mask] = grid_sample_3d(
+            attr_volume,
+            torch.cat([torch.zeros_like(coords[:, :1]), coords], dim=-1),
+            shape=torch.Size([1, attr_volume.shape[1], *grid_size.tolist()]),
+            grid=((valid_pos - aabb[0]) / voxel_size).reshape(1, -1, 3),
+            mode='trilinear',
+        )
+
     if use_tqdm:
         pbar.update(1)
     if verbose:
