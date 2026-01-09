@@ -202,7 +202,6 @@ def to_glb(
     
     mask = tri_idx_map[0] != -1
     
-    # [Fix] Permute dimensions if output is CHW (drtk convention) to HWC (mask convention)
     pos = drtk.interpolate(out_vertices.unsqueeze(0), out_faces, tri_idx_map, barys)[0]
     if pos.shape[0] == 3 and pos.shape[1] == texture_size:
         pos = pos.permute(1, 2, 0)
@@ -216,26 +215,20 @@ def to_glb(
     attrs = torch.zeros(texture_size, texture_size, attr_volume.shape[1], device='cuda')
 
     if attr_volume.dim() == 5:
-        # Dense volume case: (1, C, D, H, W)
-        # Normalize valid_pos to [-1, 1] relative to AABB
         extent = aabb[1] - aabb[0]
         sample_grid = ((valid_pos - aabb[0]) / extent) * 2 - 1
         
-        # Reshape for grid_sample: (1, 1, 1, N_points, 3)
         sample_grid = sample_grid.reshape(1, 1, 1, -1, 3)
         
-        # Sample using standard PyTorch bilinear (trilinear for 3D) interpolation
         sampled_attrs = F.grid_sample(
             attr_volume,
             sample_grid,
             mode='bilinear',
             align_corners=False
         )
-        # Result: (1, C, 1, 1, N_points) -> (C, N_points) -> (N_points, C)
         sampled_attrs = sampled_attrs.view(attr_volume.shape[1], -1).permute(1, 0)
         attrs[mask] = sampled_attrs
     else:
-        # Sparse case using custom grid_sample_3d
         attrs[mask] = grid_sample_3d(
             attr_volume,
             torch.cat([torch.zeros_like(coords[:, :1]), coords], dim=-1),
@@ -283,8 +276,6 @@ def to_glb(
     uvs_np = out_uvs.cpu().numpy()
     normals_np = out_normals.cpu().numpy()
     
-    vertices_np[:, 1], vertices_np[:, 2] = vertices_np[:, 2], -vertices_np[:, 1]
-    normals_np[:, 1], normals_np[:, 2] = normals_np[:, 2], -normals_np[:, 1]
     uvs_np[:, 1] = 1 - uvs_np[:, 1] 
     
     textured_mesh = trimesh.Trimesh(
