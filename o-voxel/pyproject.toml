@@ -9,6 +9,7 @@ requires = [
     "tqdm",
     "zstandard",
     "easydict"
+    "drtk"
 ]
 build-backend = "setuptools.build_meta"
 
@@ -32,3 +33,6 @@ dependencies = [
     "cumesh @ git+https://github.com/JeffreyXiang/CuMesh.git",
     "flex_gemm @ git+https://github.com/JeffreyXiang/FlexGEMM.git",
 ]
+
+[tool.uv.sources]
+drtk = { git = "https://github.com/iernstig/DRTK" }
